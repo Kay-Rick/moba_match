@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <queue>
 #include <vector>
+#include <algorithm>
 #include <unistd.h>
 
 using namespace ::apache::thrift;
@@ -61,14 +62,26 @@ class Pool {
             }
         }
 
+        bool check_match(int i, int j) {
+            User a = users[i], b = users[j];
+            int dt = abs(a.score - b.score);
+            int a_max_dif = wts[i] * 50;
+            int b_max_dif = wts[j] * 50;
+            return dt <= a_max_dif && dt <= b_max_dif;
+        }
+
         void match() {
+            for (uint32_t i = 0; i < wts.size(); i++) {
+                wts[i]++;
+            }
+
             while (users.size() > 1) {
                 // auto a = users[0], b = users[1];
                 // users.erase(users.begin());
                 // users.erase(users.begin());
                 // save_result(a.id, b.id);
 
-                sort(users.begin(), users.end(), [&](User& a, User& b) {
+                /*sort(users.begin(), users.end(), [&](User& a, User& b) {
                     return a.score < b.score;
                 });
                 
@@ -83,18 +96,42 @@ class Pool {
                     }
                 }
                 if (flag)
+                    break;*/
+
+                bool flag = true;
+                for (uint32_t i = 0; i < users.size(); i++) {
+                    for (uint32_t j = i + 1; j < users.size(); j++) {
+                        if (check_match(i, j)) {
+                            auto a = users[i], b = users[j];
+                            users.erase(users.begin() + j);
+                            users.erase(users.begin() + i);
+                            wts.erase(wts.begin() + j);
+                            wts.erase(wts.begin() + i);
+                            save_result(a.id, b.id);
+                            flag = false;
+                            break;
+                        }
+                    }
+                    if (!flag)
+                        break;
+                }
+                
+                if (flag)
                     break;
+
             }
         }
 
         void add (User user) {
             users.push_back(user);
+            wts.push_back(0);
         }
 
         void remove(User user) {
             for (uint32_t i = 0; i < users.size(); i++) {
                 if (users[i].id == user.id) {
                     users.erase(users.begin() + i);
+                    wts.erase(wts.begin() + i);
                     break;
                 }
             }
@@ -102,6 +139,7 @@ class Pool {
 
     private:
         vector<User> users;
+        vector<int> wts;
 }pool;
 
 class MatchHandler : virtual public MatchIf {
@@ -139,7 +177,6 @@ void consume_task() {
             lck.unlock();
             pool.match();
             sleep(1);
-            continue;
         }
         else {
             auto task = message_queue.q.front();
@@ -152,7 +189,6 @@ void consume_task() {
             } else {
                 pool.remove(task.user);
             }
-            pool.match();
         }
     }
 }
